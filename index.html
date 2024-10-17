@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Zip Code Map</title>
+        <meta charset='utf-8' />
+        <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+        <script src="https://unpkg.com/maplibre-gl@^4.7.1/dist/maplibre-gl.js"></script>
+        <link href="https://unpkg.com/maplibre-gl@^4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+
+        <!-- font -->
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap" rel="stylesheet">
+
+        <!-- csv parsing -->
+        <script src="https://unpkg.com/papaparse"></script>
+
+        <style>
+            * {
+                font-family: "Inter", sans-serif;
+                font-optical-sizing: auto;
+                font-style: normal;
+            }
+
+            body {
+                margin: 0;
+                padding: 0;
+            }
+
+            #overlay {
+                background: lightblue;
+                bottom: 0;
+                left: 0;
+                position: absolute;
+                right: 0;
+                top: 0;
+                z-index: 99;
+            }
+
+            #overlay-inner {
+                left: 50%;
+                position: absolute;
+                top: 50%;
+                transform: translate(-50%, -50%);
+            }
+
+            .maplibregl-popup-content {
+                white-space: pre-line;
+            }
+
+            #app {
+                bottom: 0;
+                left: 0;
+                right: 0;
+                position: absolute;
+                top: 0;
+            }
+            #map {
+                bottom: 0;
+                left: 0;
+                right: 0;
+                position: absolute;
+                top: 0;                
+            }
+
+            #pagename {
+                display: inline-block;
+                font-size: 26px;
+                font-weight: bold;
+            }
+
+            #warning {
+                display: inline-block;
+                color: black;
+                font-weight: bold;
+                margin-left: 15px;
+            }
+            #warning-mobile-inner {
+                left: 15px;
+                position: absolute;
+                top: 50%;
+                transform: translateY(-50%);
+            }
+
+            @media screen and (max-width: 800px) {
+                #footer {
+                    font-size: 12px;
+                }
+
+                #logo {
+                    display: none;
+                }
+                #header #text {
+                    left: 15px;
+                }
+
+                /* #warning {
+                    display: none;
+                }
+                #warning-mobile {
+                    background: #004360;
+                    height: 30px;
+                    left: 0;
+                    padding-left: 10px;
+                    position: absolute;
+                    right: 0;
+                    top: 56px;
+                    width: 100%;
+                } */
+            }
+
+            .marker {
+                border: 2px solid #004360;
+                /* background: #00A3BD; */
+                border-radius: 26px;
+                height: 26px;
+                text-align: center;
+                width: 26px;
+            }
+            .marker-inner {
+                background: #00A3BD;
+                border-radius: 20px;
+                height: 20px;
+                left: 50%;
+                position: absolute;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                width: 20px;
+            }
+            .marker-inner-power {
+                background: transparent;
+                height: 30px;
+                left: 50%;
+                position: absolute;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                width: 30px;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="app">
+            <div id="overlay">
+                <div id="overlay-inner">
+                    <div id="choose">
+                        <label for="csv">Upload CSV with Zip Code column</label>
+                        <input id="csv" type="file">
+                    </div>
+                    <div id="messages">
+
+                    </div>
+                </div>
+            </div>
+            <div id="map"></div>
+        </div>
+        <script>            
+            var mapOptions = {
+                container: 'map', // container id
+                // Define the map syle (OpenStreetMap raster tiles)
+                style: "https://api.maptiler.com/maps/streets-v2-light/style.json?key=mYniYTe7rfEM5jAFdfKy",
+                center: [-85.310947, 35.055666], // starting position [lng, lat]
+                zoom: 11 // starting zoom
+            };
+
+            // zoom out more if on mobile
+            if (window.innerWidth < 800) {
+                mapOptions.zoom = 9;
+                mapOptions.attributionControl = false;
+            }
+
+            var map = new maplibregl.Map(mapOptions);
+
+            if (window.innerWidth < 800) {
+                map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+            }
+
+            document.getElementById("csv").addEventListener("change", async function () {
+                const file = document.getElementById("csv").files[0];
+                if (file) {
+                    document.getElementById("choose").style.display = "none";
+
+                    document.getElementById("messages").innerHTML = "loading file...";
+                    const text = await new Promise(function (resolve) {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.readAsText(file);
+                    });
+                    document.getElementById("messages").innerHTML += "done<br/>parsing file...";
+                    const parsed = Papa.parse(text, { header: true });
+                    console.log("parsed:", parsed);
+
+                    document.getElementById("messages").innerHTML += "done<br/>identifying zip code column...";
+                    // determine which column has zip codes
+                    const zip_code_field = parsed.meta.fields.map(field => {
+                        const values = parsed.data.map(it => it[field]);
+                        const count_zip_code = values.filter(it => typeof it === "string" && it.trim().match(/^\d{5}$/)).length;
+                        const percentage = count_zip_code / values.length;
+                        return { field, percentage };
+                    }).sort((a, b) => b.percentage - a.percentage)[0].field;
+                    console.log("zip_code_field:", zip_code_field);
+                    document.getElementById("messages").innerHTML += `done<br/>zip code column is "${zip_code_field}"`;
+
+                    const value_field = parsed.meta.fields.filter(field => field !== zip_code_field)[0];
+                    document.getElementById("messages").innerHTML += `done<br/>value column is "${value_field}"`;
+                    console.log("value_field:", value_field);
+
+                    const zip_codes = Array.from(new Set(parsed.data.map(it => it[zip_code_field]).filter(it => it.trim().match(/^\d{5}$/)).map(it => Number(it.trim())))).sort((a, b) => b - a);
+                    console.log("zip_codes:", zip_codes);
+
+                    // sum each zip code
+                    const scores = {};
+                    parsed.data.forEach(row => {
+                        const zip = row[zip_code_field];
+                        const value = Number(row[value_field]);
+                        if (zip in scores) {
+                            scores[zip] += Number(value);
+                        } else {
+                            scores[zip] = Number(value);
+                        }
+                    });
+                    console.log("scores:", scores);
+
+                    const max_value = Object.values(scores).reduce((acc, it) => Math.max(acc, it), null);
+
+                    document.getElementById("messages").innerHTML += `<br/>fetching zip code polygon from the U.S. Census Bureau...`;
+                    // fetch zip codes
+                    const where = encodeURIComponent(`ZCTA5 IN (${zip_codes.map(it => `'${it}'`).join(",")})`);
+                    const url = `https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_ACS2022/MapServer/0/query?where=${where}&timeRelation=esriTimeRelationOverlaps&geometry=&geometryType=esriGeometryEnvelope&spatialRel=esriSpatialRelIntersects&distance=&units=esriSRUnit_Foot&outFields=ZCTA5&returnGeometry=true&returnTrueCurves=false&returnIdsOnly=false&returnCountOnly=false&returnZ=false&returnM=false&returnDistinctValues=false&returnExtentOnly=false&sqlFormat=none&featureEncoding=esriDefault&f=geojson`;
+                    const res = await fetch(url);
+                    const geojson = await res.json();
+                    console.log("geojson:", geojson);
+                    
+                    // add values to every zip code polygon
+                    geojson.features.forEach(feature => {
+                        feature.properties["VALUE"] = scores[feature.properties.ZCTA5];
+                    });
+                    console.log(geojson);
+                    
+                    document.getElementById("messages").innerHTML += `done<br/>loading map...`;
+
+                    
+                    // map.addSource('zip-code-polygons-source', {
+                    //     type: 'geojson',
+                    //     data: geojson
+                    // });
+
+                    console.log("max_value:", max_value);
+
+                    map.addLayer({
+                        id: "zip-code-polygons",
+                        type: "fill-extrusion",
+                        source: {
+                            type: "geojson",
+                            data: geojson
+                        },
+                        paint: {
+                            'fill-extrusion-base': 0,
+                            'fill-extrusion-color': [
+                                'interpolate',
+                                ['linear'],
+                                ['get', 'VALUE'],
+                                0, '#00D3EB',
+                                100, '#004360',
+                            ],
+                            "fill-extrusion-height": ['*', 100, ['get', 'VALUE']],
+                            'fill-extrusion-opacity': 0.9
+                        }
+                    })
+
+                    // map.addLayer({
+                    //     'id': 'zip-code-polygons',
+                    //     'type': 'fill',
+                    //     'source': 'zip-code-polygons-source',
+                    //     'paint': {
+                    //         'fill-color': '#888888',
+                    //         'fill-outline-color': 'red',
+                    //         'fill-opacity': 0.4
+                    //     },
+
+                    //     // filter for (multi)polygons; for also displaying linestrings
+                    //     // or points add more layers with different filters
+                    //     'filter': ['==', '$type', 'Polygon']
+                    // });
+
+                    map
+
+                    document.getElementById("overlay").style.display = "none";
+                }
+            });
+        </script>
+    </body>
+</html>
